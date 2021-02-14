@@ -21,65 +21,84 @@ The Phishing Intelligence Engine (PIE) is a framework built around evaluating e-
   - Dynamic Case Management integration and metrics tracking
 
 
-#### 4.0 Updates:
-
-**PIE has been re-written with focus on:**
+**PIE 4.0 has been re-written with focus on:**
 
   1. Reduced setup and configuration complexity
-  * Automated e-mail inbox folder setup
-  * Automated PIE folder management for tmp, case, and logging
-  * No longer requires use of Outlook application
-  * No longer requires Microsoft 365 service account
-  * Requires no priviledged accesss account(s)
+     * No longer requires use of Outlook application
+     * No longer requires Microsoft 365 service account
+     * Requires no priviledged accesss account(s)
+     * Automated e-mail inbox folder setup
+     * Automated PIE folder management for tmp, case, and logging
   
   2. Expand module availability
-  * PIE is now supports working with any mail service provider that supports IMAP client connectivity
+     * PIE is now supports working with any mail service provider that supports IMAP client connectivity
   
   3. Expanded use of LogRhythm API use
-  * Able to leverage the LogRhyhtm Search API to identify message delivery results associated with the e-mail analysis
-  * Log results enriched into the LogRhythm Case to accelerate investigation
-  * LogRhythm's TrueIdentity service provides enriched details on initial e-mail sender and recipient
-  * Apply multiple case tags and/or playbooks to enabling improved reporting and SOC investigation management
-  * Earliest Evidence metrics populated to ensure Mean Time to Detect and Mean Time to Respond metrics are consistently available
+     * Able to leverage the LogRhyhtm Search API to identify message delivery results associated with the e-mail analysis
+     * Log results enriched into the LogRhythm Case to accelerate investigation
+     * LogRhythm's TrueIdentity service provides enriched details on initial e-mail sender and recipient
+     * Apply multiple case tags and/or playbooks to enabling improved reporting and SOC investigation management
+     * Earliest Evidence metrics populated to ensure Mean Time to Detect and Mean Time to Respond metrics are consistently available
   
   4. Improved processing logic
-  * Dedicated pipelines have been established to enable optimal processing and facilitate easier scale and project growth
+     * Dedicated pipelines have been established to enable optimal processing and facilitate easier scale and project growth
   
   5. Improved runtime diagnostics
-  * Runtime metrics captured for every analysis
-  * Additional details and error handling provided in the PIE runlog
+     * Runtime metrics captured for every email analyzed
+     * Additional details and error handling provided in the PIE runlog
   
    6. Improved case content quality
-  * PIE Analysis Summary
-  * URL and Attachment Summary
-  * Header Analysis Summary
-  * Search Result Summary
+     * PIE Analysis Summary
+     * URL and Attachment Summary
+     * Header Analysis Summary
+     * Search Result Summary
   
   7. Additional evidence output content
-  * LogRhythm search results are exported to csv
-  * A complete analysis json object file is now available to enable additional integrations
-  * Case report updated to reflect same content provided in LogRhythm Case
+     * A complete analysis json object file is now available to enable additional integrations
+     * Case report updated to reflect same content provided in LogRhythm Case
+     * LogRhythm search results are exported to csv
   
   8. New inspection methods
-  * A new header inspection process is included to provide and summarize header details
-
-
+     * A new header inspection process is included to summarize and provide header details
 
 ## [Additional Information]
 
-LogRhythm.Tools: https://github.com/LogRhythm-Tools/LogRhythm.Tools
+The Phishing Intelligence Engine 4.0 is built on top of LogRhythm.Tools.  As a part of installing and leveraging PIE it is now required for LogRhythm.Tools to be installed prior to implementing PIE.
+
+For information on LogRhythm.Tools and detailed steps on how to install, access the LogRhythm.Tools Project here:
+https://github.com/LogRhythm-Tools/LogRhythm.Tools
+
+To download the latest LogRhythm.Tools release package, visit:
+https://github.com/LogRhythm-Tools/LogRhythm.Tools/releases
 
 
 ## [Install and Usage]
 
+### [Requirements]
 
+1. System requirements:
+    -	Windows Server: 2019, 2016, 2012 R2
+    - CPU: 2 Cores
+    -	RAM: 8 GB
+    -	OS Drive: 100 GB
+    -	Data Drive: 100 GB
+    -	Software: 
+        - Microsoft .Net 4.5
+        -	PowerShell v5.1
+
+2. A dedicated e-mail inbox that receives submitted suspicious e-mail messages with the original e-mail message provided as a .eml or .msg attachment.
+   
+3. The dedicated e-mail inbox must be configured to support IMAP e-mail client connectivity.
+
+4. Installation of LogRhythm.Tools PowerShell Module.
+   
 
 ## [Thanks!]
 
 This project would not be a success without the folks below and the various third-party API integration providers. Thank you!
 
-**Initial author and creator of PIE.**
-- [Greg Foss](https://github.com/gfoss) - formerly of LogRhythm Labs.  
+**Creator and former lead author of PIE.**
+- [Greg Foss](https://github.com/gfoss) - formerly of LogRhythm Labs.
 
 ### [PIE v3 Contributors]
 - bruce deakyne -  Cisco AMP Threat GRID Plugin
@@ -87,16 +106,18 @@ This project would not be a success without the folks below and the various thir
 - jake reynolds - OpenDNS Plugin
 - julian crowley - Message Tracking Log Parsing
 - matt willems - LogRhythm Case API Plugin
-- shaunessy o'brien - PIE Logo
 - sslawter, LogRhythm Community - PIE Message Trace enhancements
-- steve warburton - User Acceptance Testing
 - zack rowland - Outlook Button
 - SwiftOnSecurity - Phishing RegEx
+
+### [Additional Contributions]
+- shaunessy o'brien - PIE Logo
+- steve warburton - User Acceptance Testing
 
 
 ## [Lead Author]
 
-[Eric Hart](https://github.com/Jtekt) - LogRhythm Technical Account Manager
+[Eric Hart](https://github.com/Jtekt) - LogRhythm - Technical Account Manager
 
 
 ## [License]
