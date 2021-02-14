@@ -23,37 +23,38 @@ The Phishing Intelligence Engine (PIE) is a framework built around evaluating e-
 
 #### 4.0 Updates:
 
-	- Completely re-written with focus on:
-  -- Expand module availability
-  --- PIE is now supports working with any mail service provider that supports IMAP client connectivity
-  -- Expanded use of LogRhythm API use
-  --- Now able to leverage the LogRhyhtm Search API to identify message delivery results associated with the e-mail analysis
-  --- Log results enriched into the LogRhythm Case to accelerate investigation(s)
-  --- Leverage LogRhythm's TrueIdentity service to grain enriched details on initial e-mail sender and recipient
-  --- Apply multiple case tags and/or playbooks to enrich reporting and SOC investigation management
-  --- Cases approporiately have their Earliest Evidence metric to ensure Mean Time to Detect and Mean Time to Respond metrics are consistently available
-  -- Improved processing logic
-  --- Dedicated pipelines have been established to enable optimal processing and facilitate easier scale and project growth
-  -- Improved runtime diagnostics
-  --- Runtime metrics captured for every analysis
-  --- Additional details and error handling provided in the PIE runlog
-  -- Improved case content quality
-  --- PIE Analysis Summary
-  --- URL and Attachment Summary
-  --- Header Analysis Summary
-  --- Search Result Summary
-  -- Additional evidence output content
-  --- LogRhythm search results are exported to csv
-  --- A complete analysis json object file is now available to enable additional integrations
-  --- Case report updated to reflect same content provided in LogRhythm Case
-  -- New inspection methods
-  --- A new header inspection process is included to provide and summarize header details
-  -- Reduced setup and configuration complexity
-  --- Automated e-mail inbox folder setup
-  --- Automated PIE folder management for tmp, case, and logging
-  --- No longer requires use of Outlook application
-  --- No longer requires Microsoft 365 service account
-  --- Requires no priviledged accesss account(s)
+- Completely re-written with focus on:
+  1 Reduced setup and configuration complexity
+  * Automated e-mail inbox folder setup
+  * Automated PIE folder management for tmp, case, and logging
+  * No longer requires use of Outlook application
+  * No longer requires Microsoft 365 service account
+  * Requires no priviledged accesss account(s)
+  2 Expand module availability
+  * PIE is now supports working with any mail service provider that supports IMAP client connectivity
+  3 Expanded use of LogRhythm API use
+  * Now able to leverage the LogRhyhtm Search API to identify message delivery results associated with the e-mail analysis
+  * Log results enriched into the LogRhythm Case to accelerate investigation(s)
+  * Leverage LogRhythm's TrueIdentity service to grain enriched details on initial e-mail sender and recipient
+  * Apply multiple case tags and/or playbooks to enrich reporting and SOC investigation management
+  * Cases approporiately have their Earliest Evidence metric to ensure Mean Time to Detect and Mean Time to Respond metrics are consistently available
+  4 Improved processing logic
+  * Dedicated pipelines have been established to enable optimal processing and facilitate easier scale and project growth
+  5 Improved runtime diagnostics
+  * Runtime metrics captured for every analysis
+  * Additional details and error handling provided in the PIE runlog
+  6 Improved case content quality
+  * PIE Analysis Summary
+  * URL and Attachment Summary
+  * Header Analysis Summary
+  * Search Result Summary
+  7 Additional evidence output content
+  * LogRhythm search results are exported to csv
+  * A complete analysis json object file is now available to enable additional integrations
+  * Case report updated to reflect same content provided in LogRhythm Case
+  8 New inspection methods
+  * A new header inspection process is included to provide and summarize header details
+
 
 
 ## [Additional Information]
