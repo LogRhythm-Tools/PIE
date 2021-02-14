@@ -23,36 +23,44 @@ The Phishing Intelligence Engine (PIE) is a framework built around evaluating e-
 
 #### 4.0 Updates:
 
-- Completely re-written with focus on:
-  1 Reduced setup and configuration complexity
+**PIE has been re-written with focus on:**
+
+  1. Reduced setup and configuration complexity
   * Automated e-mail inbox folder setup
   * Automated PIE folder management for tmp, case, and logging
   * No longer requires use of Outlook application
   * No longer requires Microsoft 365 service account
   * Requires no priviledged accesss account(s)
-  2 Expand module availability
+  
+  2. Expand module availability
   * PIE is now supports working with any mail service provider that supports IMAP client connectivity
-  3 Expanded use of LogRhythm API use
-  * Now able to leverage the LogRhyhtm Search API to identify message delivery results associated with the e-mail analysis
-  * Log results enriched into the LogRhythm Case to accelerate investigation(s)
-  * Leverage LogRhythm's TrueIdentity service to grain enriched details on initial e-mail sender and recipient
-  * Apply multiple case tags and/or playbooks to enrich reporting and SOC investigation management
-  * Cases approporiately have their Earliest Evidence metric to ensure Mean Time to Detect and Mean Time to Respond metrics are consistently available
-  4 Improved processing logic
+  
+  3. Expanded use of LogRhythm API use
+  * Able to leverage the LogRhyhtm Search API to identify message delivery results associated with the e-mail analysis
+  * Log results enriched into the LogRhythm Case to accelerate investigation
+  * LogRhythm's TrueIdentity service provides enriched details on initial e-mail sender and recipient
+  * Apply multiple case tags and/or playbooks to enabling improved reporting and SOC investigation management
+  * Earliest Evidence metrics populated to ensure Mean Time to Detect and Mean Time to Respond metrics are consistently available
+  
+  4. Improved processing logic
   * Dedicated pipelines have been established to enable optimal processing and facilitate easier scale and project growth
-  5 Improved runtime diagnostics
+  
+  5. Improved runtime diagnostics
   * Runtime metrics captured for every analysis
   * Additional details and error handling provided in the PIE runlog
-  6 Improved case content quality
+  
+   6. Improved case content quality
   * PIE Analysis Summary
   * URL and Attachment Summary
   * Header Analysis Summary
   * Search Result Summary
-  7 Additional evidence output content
+  
+  7. Additional evidence output content
   * LogRhythm search results are exported to csv
   * A complete analysis json object file is now available to enable additional integrations
   * Case report updated to reflect same content provided in LogRhythm Case
-  8 New inspection methods
+  
+  8. New inspection methods
   * A new header inspection process is included to provide and summarize header details
 
 
@@ -69,9 +77,11 @@ LogRhythm.Tools: https://github.com/LogRhythm-Tools/LogRhythm.Tools
 ## [Thanks!]
 
 This project would not be a success without the folks below and the various third-party API integration providers. Thank you!
-- [Greg Foss](https://github.com/gfoss) - formerly of LogRhythm Labs.  Initial author and creator of PIE.
 
-### [PIE 3]
+**Initial author and creator of PIE.**
+- [Greg Foss](https://github.com/gfoss) - formerly of LogRhythm Labs.  
+
+### [PIE v3 Contributors]
 - bruce deakyne -  Cisco AMP Threat GRID Plugin
 - Gewch, LogRhythm Community - Special character handler in e-mail subject line and updated ShortLink parser
 - jake reynolds - OpenDNS Plugin
