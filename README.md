@@ -26,7 +26,7 @@ The Phishing Intelligence Engine (PIE) is a framework built around evaluating e-
   1. Reduced setup and configuration complexity
      * No longer requires use of Outlook application
      * No longer requires Microsoft 365 service account
-     * Requires no priviledged accesss account(s)
+     * Requires no privileged access account(s)
      * Automated e-mail inbox folder setup
      * Automated PIE folder management for tmp, case, and logging
   
