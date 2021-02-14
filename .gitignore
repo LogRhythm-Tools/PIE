@@ -1,0 +1,6 @@
+*.code-workspace
+*.xml
+.vscode
+PIE/cases/
+PIE/tmp/
+PIE/logs/
