@@ -62,7 +62,7 @@ if ( $EncodedXMLCredentials ) {
 }
 
 # E-mail address for SOC Mailbox.  Typically same as Username value.
-$SocMailbox = "phish@phishstick.io"
+$SocMailbox = ""
 
 # ================================================================================
 #                      Common Mail Providers IMAP URLs
@@ -612,6 +612,11 @@ if ($InboxNewMail.count -eq 0) {
                         Plugins = [pscustomobject]@{
                             VirusTotal = $null
                         }
+                        Links = [PSCustomObject]@{
+                            Source = $null
+                            Value = $null
+                            Details = $null
+                        }
                     }
                     # Add Attachment object to Attachments list
                     if ($Attachments -notcontains $attachment) {
@@ -619,8 +624,9 @@ if ($InboxNewMail.count -eq 0) {
                     }
                 }
             }
+            $ReportEvidence.EvaluationResults.Attachments = $Attachments
         }
-                    
+
         $ReportEvidence.EvaluationResults.Sender = $Eml.From.Address
         New-PIELogger -logSev "i" -Message "Origin sender set to: $($ReportEvidence.EvaluationResults.Sender )" -LogFile $runLog -PassThru
         if ($LrTrueId) {
@@ -657,6 +663,65 @@ if ($InboxNewMail.count -eq 0) {
             $LrSearchTask = Invoke-PIELrMsgSearch -EmailSender $($ReportEvidence.EvaluationResults.Sender) -Subject $($ReportEvidence.EvaluationResults.Subject.Original) -SocMailbox $SocMailbox
             New-PIELogger -logSev "i" -Message "LogRhythm Search API - TaskId: $($LrSearchTask.TaskId) Status: Starting" -LogFile $runLog -PassThru
         }
+
+        New-PIELogger -logSev "s" -Message "Begin Attachment Processing" -LogFile $runLog -PassThru
+        ForEach ($Attachment in $ReportEvidence.EvaluationResults.Attachments) {
+            New-PIELogger -logSev "i" -Message "Attachment: $($Attachment.Name)" -LogFile $runLog -PassThru
+            if ($LrtConfig.VirusTotal.ApiKey) {
+                New-PIELogger -logSev "i" -Message "VirusTotal - Submitting Hash: $($Attachment.Hash.Hash)" -LogFile $runLog -PassThru
+                $VTResults = Get-VtHashReport -Hash $Attachment.Hash.Hash
+                # Response Code 0 = Result not in dataset
+                if ($VTResults.response_code -eq 0) {
+                    New-PIELogger -logSev "i" -Message "VirusTotal - Result not in dataset." -LogFile $runLog -PassThru
+                    $VTResponse = [PSCustomObject]@{
+                        Status = $true
+                        Note = $VTResults.verbose_msg
+                        Results = $VTResults
+                    }
+                    $Attachment.Plugins.VirusTotal = $VTResponse
+                } elseif ($VTResults.response_code -eq 1) {
+                    # Response Code 1 = Result in dataset
+                    New-PIELogger -logSev "i" -Message "VirusTotal - Result in dataset." -LogFile $runLog -PassThru
+                    $VTResponse = [PSCustomObject]@{
+                        Status = $true
+                        Note = $VTResults.verbose_msg
+                        Results = $VTResults
+                    }
+                    $Attachment.Plugins.VirusTotal = $VTResults
+                } else {
+                    New-PIELogger -logSev "i" -Message "VirusTotal - Request failed." -LogFile $runLog -PassThru
+                    $VTResponse = [PSCustomObject]@{
+                        Status = $false
+                        Note = "Requested failed."
+                        Results = $VTResults
+                    }
+                    $Attachment.Plugins.VirusTotal = $VTResponse
+                }
+                # Inspect Attachment for URLs
+                $AttachmentTypes_UrlScrape = @("text/html")
+                if ($AttachmentTypes_UrlScrape -contains $Attachment.Type ) {
+                    $Attachment.Links.Source = $(Get-Content -Path $Attachment.Hash.Path -Raw).ToString()
+                    New-PIELogger -logSev "i" -Message "Attachment - URLs processing from Text Source" -LogFile $runLog -PassThru
+                    $Attachment.Links.Value = Get-PIEURLsFromText -Text $Attachment.Links.Source
+                    New-PIELogger -logSev "i" -Message "Attachment - URL Count: $($Attachment.Links.Value.count)" -LogFile $runLog -PassThru
+                }
+
+                # Process URL Details from Attachments
+                If ($Attachment.Links.Value) {
+                    $AttachmentUrlDetails = [list[pscustomobject]]::new()
+                    ForEach ($AttachmentURL in $Attachment.Links.Value) {
+                        
+                        $DetailResults = Get-PIEUrlDetails -Url $AttachmentURL -EnablePlugins
+                        if ($AttachmentUrlDetails -NotContains $DetailResults) {
+                            $AttachmentUrlDetails.Add($DetailResults)
+                        }
+                    }
+                    $Attachment.Links.Details = $AttachmentUrlDetails
+                }
+            }
+        }
+        New-PIELogger -logSev "s" -Message "End Attachment Processing" -LogFile $runLog -PassThru
+
 
         New-PIELogger -logSev "s" -Message "Begin Link Processing" -LogFile $runLog -PassThru
         $EmailUrls = [list[string]]::new()
@@ -699,6 +764,7 @@ if ($InboxNewMail.count -eq 0) {
                     }
                 }
             }
+            # URLs pulled from e-mail body as Text
             if ($ReportEvidence.EvaluationResults.Links.Source -like "Text") {
                 $EmailUrls = $ReportEvidence.EvaluationResults.Links.Value
                 ForEach ($EmailURL in $EmailUrls) {
@@ -713,18 +779,21 @@ if ($InboxNewMail.count -eq 0) {
                 $ReportEvidence.EvaluationResults.Links.Details = $UrlDetails
             }
         }
+        New-PIELogger -logSev "s" -Message "End - Link Processing" -LogFile $runLog -PassThru
         
-        if ($ReportEvidence.EvaluationResults.Links.Details) {                    
+        New-PIELogger -logSev "s" -Message "Begin - Link Summarization" -LogFile $runLog -PassThru
+        if ($ReportEvidence.EvaluationResults.Links.Details) {       
+            New-PIELogger -logSev "s" -Message "Begin - Link Summary from Message Body" -LogFile $runLog -PassThru           
             New-PIELogger -logSev "d" -Message "Writing list of unique domains to $tmpFolder`domains.txt" -LogFile $runLog -PassThru
             Try {
-                $($ReportEvidence.EvaluationResults.Links.Details.ScanTarget | Select-Object -ExpandProperty Domain -Unique) > "$tmpFolder`domains.txt"
+                $($ReportEvidence.EvaluationResults.Links.Details.ScanTarget | Select-Object -ExpandProperty Domain -Unique) | Set-Content -Path "$tmpFolder`domains.txt"
             } Catch {
                 New-PIELogger -logSev "e" -Message "Unable to write to file $tmpFolder`domains.txt" -LogFile $runLog -PassThru
             }
             
             New-PIELogger -logSev "d" -Message "Writing list of unique urls to $tmpFolder`links.txt" -LogFile $runLog -PassThru
             Try {
-                $($ReportEvidence.EvaluationResults.Links.Details.ScanTarget | Select-Object -ExpandProperty Url -Unique) > "$tmpFolder`links.txt"
+                $($ReportEvidence.EvaluationResults.Links.Details.ScanTarget | Select-Object -ExpandProperty Url -Unique) | Set-Content -Path "$tmpFolder`links.txt"
             } Catch {
                 New-PIELogger -logSev "e" -Message "Unable to write to file $tmpFolder`links.txt" -LogFile $runLog -PassThru
             }
@@ -734,45 +803,51 @@ if ($InboxNewMail.count -eq 0) {
 
             $CountDomains = $($ReportEvidence.EvaluationResults.Links.Details.ScanTarget | Select-Object -ExpandProperty Domain -Unique | Measure-Object | Select-Object -ExpandProperty Count)
             New-PIELogger -logSev "i" -Message "Total Unique Domains: $countDomains" -LogFile $runLog -PassThru
+            New-PIELogger -logSev "s" -Message "End - Link Summary from Message Body" -LogFile $runLog -PassThru
         }
-        New-PIELogger -logSev "s" -Message "End Link Processing" -LogFile $runLog -PassThru
-
-        New-PIELogger -logSev "s" -Message "Begin Attachment Processing" -LogFile $runLog -PassThru
-        ForEach ($Attachment in $ReportEvidence.EvaluationResults.Attachments) {
-            New-PIELogger -logSev "i" -Message "Attachment: $($Attachment.Name)" -LogFile $runLog -PassThru
-            if ($LrtConfig.VirusTotal.ApiKey) {
-                New-PIELogger -logSev "i" -Message "VirusTotal - Submitting Hash: $($Attachment.Hash.Hash)" -LogFile $runLog -PassThru
-                $VTResults = Get-VtHashReport -Hash $Attachment.Hash.Hash
-                # Response Code 0 = Result not in dataset
-                if ($VTResults.response_code -eq 0) {
-                    New-PIELogger -logSev "i" -Message "VirusTotal - Result not in dataset." -LogFile $runLog -PassThru
-                    $VTResponse = [PSCustomObject]@{
-                        Status = $true
-                        Note = $VTResults.verbose_msg
-                        Results = $VTResults
-                    }
-                    $Attachment.Plugins.VirusTotal = $VTResponse
-                } elseif ($VTResults.response_code -eq 1) {
-                    # Response Code 1 = Result in dataset
-                    New-PIELogger -logSev "i" -Message "VirusTotal - Result in dataset." -LogFile $runLog -PassThru
-                    $VTResponse = [PSCustomObject]@{
-                        Status = $true
-                        Note = $VTResults.verbose_msg
-                        Results = $VTResults
-                    }
-                    $Attachment.Plugins.VirusTotal = $VTResults
-                } else {
-                    New-PIELogger -logSev "i" -Message "VirusTotal - Request failed." -LogFile $runLog -PassThru
-                    $VTResponse = [PSCustomObject]@{
-                        Status = $false
-                        Note = "Requested failed."
-                        Results = $VTResults
-                    }
-                    $Attachment.Plugins.VirusTotal = $VTResponse
+        
+        
+        
+        if ($ReportEvidence.EvaluationResults.Attachments.Links.Details) { 
+            New-PIELogger -logSev "s" -Message "Begin - Link Summary from Attachments" -LogFile $runLog -PassThru
+            if (Test-Path "$tmpFolder`domains.txt" -PathType Leaf) {
+                Try {
+                    $($ReportEvidence.EvaluationResults.Attachments.Links.Details.ScanTarget | Select-Object -ExpandProperty Domain -Unique) | Set-Content -Path "$tmpFolder`domains.txt"
+                } Catch {
+                    New-PIELogger -logSev "e" -Message "Unable to write to file $tmpFolder`domains.txt" -LogFile $runLog -PassThru
+                }
+            } else {
+                New-PIELogger -logSev "d" -Message "Appending list of unique domains to $tmpFolder`domains.txt" -LogFile $runLog -PassThru
+                Try {
+                    $($ReportEvidence.EvaluationResults.Attachments.Links.Details.ScanTarget | Select-Object -ExpandProperty Domain -Unique) | Add-Content -Path "$tmpFolder`domains.txt"
+                } Catch {
+                    New-PIELogger -logSev "e" -Message "Unable to append to file $tmpFolder`domains.txt" -LogFile $runLog -PassThru
                 }
             }
+            
+            New-PIELogger -logSev "d" -Message "Writing list of unique urls to $tmpFolder`links.txt" -LogFile $runLog -PassThru
+            if (Test-Path "$tmpFolder`links.txt" -PathType Leaf) {
+                Try {
+                    $($ReportEvidence.EvaluationResults.Attachments.Links.Details.ScanTarget | Select-Object -ExpandProperty Url -Unique) | Set-Content -Path "$tmpFolder`links.txt"
+                } Catch {
+                    New-PIELogger -logSev "e" -Message "Unable to write to file $tmpFolder`links.txt" -LogFile $runLog -PassThru
+                }
+            } else {
+                Try {
+                    $($ReportEvidence.EvaluationResults.Attachments.Links.Details.ScanTarget | Select-Object -ExpandProperty Url -Unique) | Add-Content -Path "$tmpFolder`links.txt"
+                } Catch {
+                    New-PIELogger -logSev "e" -Message "Unable to append to file $tmpFolder`links.txt" -LogFile $runLog -PassThru
+                }
+            }
+            
+            $CountLinks = $($ReportEvidence.EvaluationResults.Attachments.Links.Details.ScanTarget | Select-Object -ExpandProperty Url -Unique | Measure-Object | Select-Object -ExpandProperty Count)
+            New-PIELogger -logSev "i" -Message "Total Unique Links: $countLinks" -LogFile $runLog -PassThru
+
+            $CountDomains = $($ReportEvidence.EvaluationResults.Attachments.Links.Details.ScanTarget | Select-Object -ExpandProperty Domain -Unique | Measure-Object | Select-Object -ExpandProperty Count)
+            New-PIELogger -logSev "i" -Message "Total Unique Domains: $countDomains" -LogFile $runLog -PassThru
+            New-PIELogger -logSev "s" -Message "End - Link Summary from Attachments" -LogFile $runLog -PassThru
         }
-        New-PIELogger -logSev "s" -Message "End Attachment Processing" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "s" -Message "End - Link Summarization" -LogFile $runLog -PassThru
 
         # Create a case folder
         New-PIELogger -logSev "s" -Message "Creating Evidence Folder" -LogFile $runLog -PassThru
@@ -1004,6 +1079,27 @@ if ($InboxNewMail.count -eq 0) {
                         Add-LrNoteToCase -id $ReportEvidence.LogRhythmCase.Number -Text $($CasePluginVTNote).subString(0, [System.Math]::Min(20000, $CasePluginVTNote.Length))
                     }
                 }
+                # Add Link plugin output to Case
+                ForEach ($AttachmentUrlDetails in $AttachmentDetails.Links.Details) {
+                    if ($shodan) {
+                        if ($AttachmentUrlDetails.Plugins.Shodan) {
+                            $CasePluginShodanNote = $AttachmentUrlDetails.Plugins.Shodan | Format-ShodanTextOutput
+                            Add-LrNoteToCase -id $ReportEvidence.LogRhythmCase.Number -Text $($CasePluginShodanNote).subString(0, [System.Math]::Min(20000, $CasePluginShodanNote.Length))
+                        }
+                    }
+                    if ($urlscan) {
+                        if ($AttachmentUrlDetails.Plugins.urlscan) {
+                            $CasePluginUrlScanNote = $AttachmentUrlDetails.Plugins.urlscan | Format-UrlscanTextOutput -Type "summary"
+                            Add-LrNoteToCase -id $ReportEvidence.LogRhythmCase.Number -Text $($CasePluginUrlScanNote).subString(0, [System.Math]::Min(20000, $CasePluginUrlScanNote.Length))
+                        }
+                    }
+                    if ($virusTotal) {
+                        if ($AttachmentUrlDetails.Plugins.VirusTotal) {
+                            $CasePluginVTNote = $AttachmentUrlDetails.Plugins.VirusTotal  | Format-VTTextOutput 
+                            Add-LrNoteToCase -id $ReportEvidence.LogRhythmCase.Number -Text $($CasePluginVTNote).subString(0, [System.Math]::Min(20000, $CasePluginVTNote.Length))
+                        }
+                    }
+                }
             }
 
             # Copy E-mail Message text body to case
@@ -1102,33 +1198,45 @@ if ($InboxNewMail.count -eq 0) {
         $EvidenceSeperator = "-----------------------------------------------`r`n"
         # Add Link plugin output to TXT Case
         ForEach ($UrlDetails in $ReportEvidence.EvaluationResults.Links.Details) {
-            if ($shodan) {
-                if ($UrlDetails.Plugins.Shodan) {
-                    $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                    $($UrlDetails.Plugins.Shodan | Format-ShodanTextOutput) | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                }
+            if ($UrlDetails.Plugins.Shodan) {
+                $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                $($UrlDetails.Plugins.Shodan | Format-ShodanTextOutput) | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
             }
-            if ($urlscan) {
-                if ($UrlDetails.Plugins.urlscan) {
-                    $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                    $($UrlDetails.Plugins.urlscan | Format-UrlscanTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                }
+            if ($UrlDetails.Plugins.urlscan) {
+                $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                $($UrlDetails.Plugins.urlscan | Format-UrlscanTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
             }
-            if ($virusTotal) {
-                if ($UrlDetails.Plugins.VirusTotal) {
-                    $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                    $($UrlDetails.Plugins.VirusTotal | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                }
+            if ($UrlDetails.Plugins.VirusTotal) {
+                $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                $($UrlDetails.Plugins.VirusTotal | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
             }
         }
 
-        # Add Attachment plugin output to Case
-        New-PIELogger -logSev "i" -Message "Case File - Appending Attachment Details to Case File." -LogFile $runLog -PassThru
-        ForEach ($AttachmentDetails in $ReportEvidence.EvaluationResults.Attachments) {
-            if ($virusTotal) {
-                $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                if ($AttachmentDetails.Plugins.VirusTotal.Status) {
-                    $($AttachmentDetails.Plugins.VirusTotal.Results | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+        # Add Attachment Link plugin output to TXT Case
+        if ($ReportEvidence.EvaluationResults.Attachments) {
+            # Add Attachment plugin output to Case
+            New-PIELogger -logSev "i" -Message "Case File - Appending Attachment Details to Case File." -LogFile $runLog -PassThru
+            ForEach ($AttachmentDetails in $ReportEvidence.EvaluationResults.Attachments) {
+                    $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    if ($AttachmentDetails.Plugins.VirusTotal.Status) {
+                        $($AttachmentDetails.Plugins.VirusTotal.Results | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    }
+            }
+
+
+            ForEach ($AttachmentUrlDetails in $ReportEvidence.EvaluationResults.Attachments.Links.Details) {
+                New-PIELogger -logSev "i" -Message "Case File - Appending Embedded URL details from Attachment to Case File." -LogFile $runLog -PassThru
+                if ($AttachmentUrlDetails.Plugins.Shodan) {
+                    $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    $($AttachmentUrlDetails.Plugins.Shodan | Format-ShodanTextOutput) | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                }
+                if ($AttachmentUrlDetails.Plugins.urlscan) {
+                    $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    $($AttachmentUrlDetails.Plugins.urlscan | Format-UrlscanTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                }
+                if ($AttachmentUrlDetails.Plugins.VirusTotal) {
+                    $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    $($AttachmentUrlDetails.Plugins.VirusTotal | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
                 }
             }
         }
@@ -1149,7 +1257,7 @@ if ($InboxNewMail.count -eq 0) {
     $attachment = $null
     $attachments = $null
     $caseID = $null
-    New-PIELogger -logSev "i" -Message "End Processing for GUID: $($ReportEvidence.Meta.Guid)" -LogFile $runLog -PassThru
+    New-PIELogger -logSev "i" -Message "End - Processing for GUID: $($ReportEvidence.Meta.Guid)" -LogFile $runLog -PassThru
 }
 
 # Move items from inbox to target folders
