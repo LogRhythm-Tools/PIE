@@ -6,11 +6,11 @@
 Copyright 2021 LogRhythm Inc. - See licensing details below
 
 - [[About]](#about)
-    + [Features:](#features)
+    + [Features](#features)
 - [[Additional Information]](#additional-information)
 - [[Install and Usage]](#install-and-usage)
   * [[Requirements]](#requirements)
-- [[Thanks!]](#thanks!)
+- [[Thanks!]](#thanks)
   * [[PIE v3 Contributors]](#pie-v3-contributors)
   * [[Additional Contributions]](#additional-contributions)
 - [[Lead Author]](#lead-author)
