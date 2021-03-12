@@ -5,6 +5,18 @@
 
 Copyright 2021 LogRhythm Inc. - See licensing details below
 
+- [[About]](#about)
+    + [Features](#features)
+- [[Additional Information]](#additional-information)
+- [[Install and Usage]](#install-and-usage)
+  * [[Requirements]](#requirements)
+  * [[Configuration Guidance]](#configuration-guidance)
+- [[Thanks!]](#thanks)
+  * [[PIE v3 Contributors]](#pie-v3-contributors)
+  * [[Additional Contributions]](#additional-contributions)
+- [[Lead Author]](#lead-author)
+- [[License]](#license)
+
 ## [About]
     
 ![Phishing Intelligence Engine](/images/PIE.png)
@@ -91,7 +103,25 @@ https://github.com/LogRhythm-Tools/LogRhythm.Tools/releases
 3. The dedicated e-mail inbox must be configured to support IMAP e-mail client connectivity.
 
 4. Installation of LogRhythm.Tools PowerShell Module.
-   
+
+### [Configuration Guidance]
+PIE has been designed to work with a wide variety of e-mail providers.  As a result this project cannot account for providing explicit instructions for each environment.  
+
+This section is dedicated to providing guidance and reflect the documentation from vendors detailing setting configurations that would be applicable to PIE's requirements.
+
+
+#### [Establishing a Scheduled Task]
+<a href="https://github.com/LogRhythm-Tools/PIE/wiki/Establishing-a-Scheduled-Task" target="_blank">https://github.com/LogRhythm-Tools/PIE/wiki/Establishing-a-Scheduled-Task</a>
+
+
+#### [IMAP Configuration]
+<a href="https://github.com/LogRhythm-Tools/PIE/wiki/Guidance-on-IMAP-Configuration" target="_blank">https://github.com/LogRhythm-Tools/PIE/wiki/Guidance-on-IMAP-Configuration</a>
+
+
+#### [Phish Report methods]
+<a href="https://github.com/LogRhythm-Tools/PIE/wiki/Guidance-on-Phish-Report-methods" target="_blank">https://github.com/LogRhythm-Tools/PIE/wiki/Guidance-on-Phish-Report-methods</a>
+
+
 
 ## [Thanks!]
 
