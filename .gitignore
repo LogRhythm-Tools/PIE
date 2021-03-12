@@ -4,3 +4,4 @@
 PIE/cases/
 PIE/tmp/
 PIE/logs/
+!PIE/lib/net45/*.dll
