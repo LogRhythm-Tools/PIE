@@ -85,16 +85,21 @@ $LogRhythmHost = "tam-pm"
 
 # Case Tagging and User Assignment
 # Default value - modify to match your case tagging schema. Note "PIE" tag is used with the Case Management Dashboard.
-$LrCaseTags = ("PIE", "TAG2")
+$LrCaseTags = ("PIE", "Tag2-Example")
 
-# Add as many users as you would like, separate them like so: "user1", "user2"...
-$LrCaseCollaborators = ("example, user")
+# Add Case Collaborators through a LogRhythm SIEM Notification Group.  
+# Note only Individual/Person Records assigned to a Notification Group are added as Collaborators.
+$LrCaseCollaborators = ("TAM Team")
 
 # Playbook Assignment based on Playbook Name
 $LrCasePlaybook = ("Phishing", "SOC Playbook")
 
 # Enable LogRhythm log search
 $LrLogSearch = $true
+# Maximum numer of times to check for Search Results
+$LrLogSearchMaxAttempts = 10
+# Number of seconds between each Search Results check
+$LrLogSearchCheckDelay = 15
 
 # Enable LogRhythm Case output
 $LrCaseOutput = $true
@@ -128,6 +133,9 @@ $shodan = $true
 # ================================================================================
 # Date, File, and Global Email Parsing
 # ================================================================================
+# Capture who PIE is running as, used for reporting information for support of setup and debugging
+$RunContextUser = ([Environment]::UserDomainName + "\" + [Environment]::UserName)
+
 # To support and facilitate accessing and creating resources
 $pieFolder = $PSScriptRoot
 
@@ -147,7 +155,7 @@ if (!(Test-Path $LogsOutputFolder)) {
 }
 
 # PIE Version
-$PIEVersion = 4.0
+$PIEVersion = 4.1
 
 $PIEModules = @("logrhythm.tools")
 ForEach ($ReqModule in $PIEModules){
@@ -155,7 +163,7 @@ ForEach ($ReqModule in $PIEModules){
         if ($ReqModule -like "logrhythm.tools") {
             Write-Host "$ReqModule is not installed.  Please install $ReqModule to continue."
             Write-Host "Please visit https://github.com/LogRhythm-Tools/LogRhythm.Tools"
-            Return 0
+            exit 1
         } else {
             Write-Verbose "Installing $ReqModule from default repository"
             Install-Module -Name $ReqModule -Force
@@ -168,7 +176,7 @@ ForEach ($ReqModule in $PIEModules){
             Import-Module -Name $ReqModule
         } Catch {
             Write-Host "Unable to import module: $ReqModule"
-            Return 0
+            exit 1
         }
 
     }
@@ -181,11 +189,19 @@ $LRTVersion = $(Get-Module -name logrhythm.tools | Select-Object -ExpandProperty
 New-PIELogger -logSev "i" -Message "PIE Version: $PIEVersion" -LogFile $runLog -PassThru
 New-PIELogger -logSev "i" -Message "LogRhythm Tools Version: $LRTVersion" -LogFile $runLog -PassThru
 New-PIELogger -logSev "i" -Message "Loading MailKit.dll Library" -LogFile $runLog -PassThru
+$dllLockedFileStatus = $false
 Try {
     Add-Type -Path (join-Path $pieFolder -ChildPath "lib\net45\MailKit.dll")
     New-PIELogger -logSev "i" -Message "MailKit.dll loaded successfully." -LogFile $runLog -PassThru
 } Catch {
-    New-PIELogger -logSev "e" -Message "Unable to load MailKit.dll Library" -LogFile $runLog -PassThru
+    New-PIELogger -logSev "i" -Message "Unable to load MailKit.dll -  Unblocking File" -LogFile $runLog -PassThru
+    Try {
+        New-PIELogger -logSev "i" -Message "Unblocking file MailKit.dll" -LogFile $runLog -PassThru
+        Unblock-File -Path (join-Path $pieFolder -ChildPath "lib\net45\MailKit.dll")
+        $dllLockedFileStatus = $true
+    } Catch {
+        New-PIELogger -logSev "e" -Message "Unable to unblock MailKit.dll Library" -LogFile $runLog -PassThru
+    }
 }
 
 New-PIELogger -logSev "i" -Message "Loading MimeKit.dll Library" -LogFile $runLog -PassThru
@@ -193,7 +209,21 @@ Try {
     Add-Type -Path (join-Path $pieFolder -ChildPath "lib\net45\MimeKit.dll") -ReferencedAssemblies (join-Path $pieFolder -ChildPath "lib\net45\BouncyCastle.Crypto.dll")
     New-PIELogger -logSev "i" -Message "MimeKit.dll loaded successfully." -LogFile $runLog -PassThru
 } Catch {
-    New-PIELogger -logSev "e" -Message "Unable to load MimeKit.dll Library" -LogFile $runLog -PassThru
+    Try {
+        New-PIELogger -logSev "i" -Message "Unblocking file MimeKit.dll" -LogFile $runLog -PassThru
+        Unblock-File -Path (join-Path $pieFolder -ChildPath "lib\net45\MimeKit.dll")
+        New-PIELogger -logSev "i" -Message "Unblocking file BouncyCastle.Crypto.dll" -LogFile $runLog -PassThru
+        Unblock-File -Path (join-Path $pieFolder -ChildPath "lib\net45\BouncyCastle.Crypto.dll")
+        $dllLockedFileStatus = $true
+    } Catch {
+        New-PIELogger -logSev "e" -Message "Unable to load MimeKit.dll Library" -LogFile $runLog -PassThru
+    }
+}
+
+if ($dllLockedFileStatus -eq $true) {
+    New-PIELogger -logSev "s" -Message "PIE has performed DLL Unblocking for requirement components." -LogFile $runLog -PassThru
+    New-PIELogger -logSev "a" -Message "Please close this PowerShell session and run Invoke-PIE in a new session." -LogFile $runLog -PassThru
+    exit 1
 }
 
 $CaseOutputFolder = (Join-Path $pieFolder -ChildPath "cases")
@@ -203,6 +233,8 @@ if (!(Test-Path $CaseOutputFolder)) {
         New-Item -Path $CaseOutputFolder -ItemType Directory -Force | Out-Null
     } Catch {
         New-PIELogger -logSev "e" -Message "Unable to create folder: $CaseOutputFolder" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $CaseOutputFolder" -LogFile $runLog -PassThru
+        exit 1
     } 
 }
 
@@ -213,6 +245,8 @@ if (!(Test-Path $CaseTmpFolder)) {
         New-Item -Path $CaseTmpFolder -ItemType Directory -Force | Out-Null
     } Catch {
         New-PIELogger -logSev "e" -Message "Unable to create folder: $CaseTmpFolder" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $CaseTmpFolder" -LogFile $runLog -PassThru
+        exit 1
     }
     
 }
@@ -232,6 +266,8 @@ if ( $(Test-Path $phishLog -PathType Leaf) -eq $false ) {
         Set-Content $phishLog -Value "Guid,Timestamp,MessageId,SenderAddress,RecipientAddress,Subject"
     } Catch {
         New-PIELogger -logSev "e" -Message "Unable to create file: $phishLog" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $phishLog" -LogFile $runLog -PassThru
+        exit 1
     }    
 }
 <# IMAP #>
@@ -729,10 +765,10 @@ if ($InboxNewMail.count -eq 0) {
             $UrlDetails = [list[pscustomobject]]::new()
             if ($ReportEvidence.EvaluationResults.Links.Source -like "HTML") {
                 New-PIELogger -logSev "i" -Message "Link processing from HTML Source" -LogFile $runLog -PassThru
-                $EmailUrls = $($ReportEvidence.EvaluationResults.Links.Value | Where-Object -Property Type -like "Url")
+                $EmailUrls = $($ReportEvidence.EvaluationResults.Links.Value | Where-Object -Property Type -like "Url" | Where-Object -Property Base -ne $True)
                 $DomainGroups = $EmailUrls.hostname | group-object
                 $UniqueDomains = $DomainGroups.count
-                New-PIELogger -logSev "i" -Message "Links: $($EmailUrls.count) Domains: $UniqueDomains" -LogFile $runLog -PassThru
+                New-PIELogger -logSev "i" -Message "Domains: $UniqueDomains" -LogFile $runLog -PassThru
                 ForEach ($UniqueDomain in $DomainGroups) {  
                     New-PIELogger -logSev "i" -Message "Domain: $($UniqueDomain.Name) URLs: $($UniqueDomain.Count)" -LogFile $runLog -PassThru
                     if ($UniqueDomain.count -ge 2) {
@@ -891,11 +927,14 @@ if ($InboxNewMail.count -eq 0) {
             New-PIELogger -logSev "s" -Message "LogRhythm API - Poll Search Status" -LogFile $runLog -PassThru
             New-PIELogger -logSev "i" -Message "LogRhythm Search API - TaskId: $($LrSearchTask.TaskId)" -LogFile $runLog -PassThru
             if ($LrSearchTask.StatusCode -eq 200) {
+                $LrLogSearchAttempts = 0
                 do {
+                    $LrLogSearchMaxAttempts = $LrLogSearchMaxAttempts + 1
                     $SearchStatus = Get-LrSearchResults -TaskId $LrSearchTask.TaskId -PageSize 1000 -PageOrigin 0
-                    Start-Sleep 10
-                    New-PIELogger -logSev "i" -Message "LogRhythm Search API - TaskId: $($LrSearchTask.TaskId) Status: $($SearchStatus.TaskStatus)" -LogFile $runLog -PassThru
-                } until ($SearchStatus.TaskStatus -like "Completed*")
+                    Start-Sleep $LrLogSearchCheckDelay
+                    New-PIELogger -logSev "i" -Message "LogRhythm Search API - TaskId: $($LrSearchTask.TaskId) Status: $($SearchStatus.TaskStatus)  Attempt: $LrLogSearchAttempts" -LogFile $runLog -PassThru
+                } until ($SearchStatus.TaskStatus -like "Completed*" -or ($LrLogSearchAttempts -ge $LrLogSearchMaxAttempts))
+                
                 New-PIELogger -logSev "i" -Message "LogRhythm Search API - TaskId: $($LrSearchTask.TaskId) Status: $($SearchStatus.TaskStatus)" -LogFile $runLog -PassThru
                 $ReportEvidence.LogRhythmSearch.TaskId = $LrSearchTask.TaskId
                 $LrSearchResults = $SearchStatus
@@ -1010,22 +1049,26 @@ if ($InboxNewMail.count -eq 0) {
                 New-PIELogger -logSev "i" -Message "LogRhythm API - End applying case tags" -LogFile $runLog -PassThru
             }
 
-            # Adding and assigning other users
-            
+            # Adding and assigning other users based on Notification Group
             if ( $LrCaseCollaborators ) {
                 New-PIELogger -logSev "s" -Message "Begin - LogRhythm Case Collaborators Block" -LogFile $runLog -PassThru
-                ForEach ($LrCaseCollaborator in $LrCaseCollaborators) {
-                    $LrCollabortorStatus = Get-LrUsers -Name $LrPlaybook -Exact
-                    if ($LrCollabortorStatus) {
-                        New-PIELogger -logSev "i" -Message "LogRhythm API - Adding Collaborator:$LrCaseCollaborator to Case:$($ReportEvidence.LogRhythmCase.Number)" -LogFile $runLog -PassThru
-                        Add-LrCaseCollaborators -Id $ReportEvidence.LogRhythmCase.Number -Names $LrCaseCollaborator
+
+                $NGCollabResults = Get-LrNotificationGroups -Name $LrCaseCollaborators -Exact
+                if (($NGCollabResults.error -ne $true) -and ($NGCollabResults)) {
+                    [string[]]$CollaboratorIds = Get-LrNotificationGroupUsers -Name $LrCaseCollaborators  -Exact | Where-Object -Property 'userType' -like 'Individual' |  Select-Object -ExpandProperty id
+                    if ($CollaboratorIds) {
+                        Add-LrCaseCollaborators -Id $ReportEvidence.LogRhythmCase.Number -Numbers $CollaboratorIds
+                        New-PIELogger -logSev "i" -Message "LogRhythm API - Successfully added Individuals from Notification Group: $LrCaseCollaborators to Case:$($ReportEvidence.LogRhythmCase.Number)" -LogFile $runLog -PassThru
                     } else {
-                        New-PIELogger -logSev "e" -Message "LogRhythm API - Collaborator:$LrCaseCollaborator not found or not accessible due to permissions." -LogFile $runLog -PassThru
+                        New-PIELogger -logSev "e" -Message "LogRhythm API - No Individual Records identified on Notification Group: $LrCaseCollaborators" -LogFile $runLog -PassThru
                     }
-                }        
-                New-PIELogger -logSev "s" -Message "End - LogRhythm Case Collaborators Block" -LogFile $runLog -PassThru      
+                } elseif ($NGCollabResults.error -eq $true) {
+                    New-PIELogger -logSev "i" -Message "LogRhythm API - Notification Group:$LrCaseCollaborators not found or not accessible due to permissions." -LogFile $runLog -PassThru
+                }
+
+                New-PIELogger -logSev "s" -Message "End - LogRhythm Case Collaborators Block" -LogFile $runLog -PassThru
             } else {
-                New-PIELogger -logSev "d" -Message "LogRhythm API - Collaborators Omision - Collaborators not defined" -LogFile $runLog -PassThru
+                New-PIELogger -logSev "d" -Message "LogRhythm API - Collaborators Omision - Collaborators notification group not defined" -LogFile $runLog -PassThru
             }
 
             # Add case playbook if playbook has been defined.
@@ -1161,23 +1204,75 @@ if ($InboxNewMail.count -eq 0) {
 # Case Closeout
 # ================================================================================
 
-        # Write PIE Report Json object out to Case as Evidence
-        New-PIELogger -logSev "i" -Message "Case Json - Writing ReportEvidence to $($caseFolder)$($caseId)\Case_Report.json" -LogFile $runLog -PassThru
-        Try {
-            $ReportEvidence | ConvertTo-Json -Depth 50 | Out-File -FilePath "$caseFolder$caseID\Case_Report.json"
-        } Catch {
-            New-PIELogger -logSev "e" -Message "Case Json - Unable to write ReportEvidence to $($caseFolder)$($caseId)\Case_Report.json" -LogFile $runLog -PassThru
-        }
-
-        if ($LrSearchResultLogs) {
-            New-PIELogger -logSev "i" -Message "Case Logs - Writing Search Result logs to $($caseFolder)$($caseId)\Case_Logs.csv" -LogFile $runLog -PassThru
-            Try {
-                $LrSearchResultLogs | Export-Csv -Path "$caseFolder$caseID\Case_Logs.csv" -Force -NoTypeInformation
-            } Catch {
-                New-PIELogger -logSev "e" -Message "Case Logs - Unable to write Search Result logs to $($caseFolder)$($caseId)\Case_Logs.csv" -LogFile $runLog -PassThru
+        # Write JSON Report as Evidence
+        New-PIELogger -logSev "s" -Message "Case File - Begin - Writing plugin details to JSON File." -LogFile $runLog -PassThru
+        New-PIELogger -logSev "i" -Message "Case File - Establishing Plugin Details to JSON File." -LogFile $runLog -PassThru
+        # Plugin Output Counters
+        $Count_Shodan = 0
+        $Count_VirusTotal = 0
+        $Count_UrlScan = 0
+        # Add Link plugin output to JSON File
+        New-PIELogger -logSev "i" -Message "Case File - Begin - Url Details to JSON File." -LogFile $runLog -PassThru
+        ForEach ($UrlDetails in $ReportEvidence.EvaluationResults.Links.Details) {
+            $CaseFileBase = "\U_$($UrlDetails.Host)_"
+            if ($UrlDetails.Plugins.Shodan) {
+                $Count_Shodan += 1
+                $CaseFileOutput = $CaseFileBase + "Shodan_" + $("{0:d2}" -f $Count_Shodan).ToString() + ".json"
+                # Output Shodan Summary to JSON File
+                $UrlDetails.Plugins.Shodan | ConvertTo-JSON -Depth 40 | Out-File -FilePath $caseFolder$caseID$CaseFileOutput
+                
+            }
+            if ($UrlDetails.Plugins.urlscan) {
+                $Count_UrlScan += 1
+                $CaseFileOutput = $CaseFileBase + "UrlScan_" + $("{0:d2}" -f $Count_UrlScan).ToString() + ".json"
+                $UrlDetails.Plugins.urlscan | ConvertTo-JSON -Depth 40 | Out-File -FilePath $caseFolder$caseID$CaseFileOutput
+            }
+            if ($UrlDetails.Plugins.VirusTotal) {
+                $Count_VirusTotal += 1
+                $CaseFileOutput = $CaseFileBase + "VirusTotal_" + $("{0:d2}" -f $Count_VirusTotal).ToString() + ".json"
+                $UrlDetails.Plugins.VirusTotal | ConvertTo-JSON -Depth 40 | Out-File -FilePath $caseFolder$caseID$CaseFileOutput
             }
         }
-         
+        New-PIELogger -logSev "i" -Message "Case File - End - Url Details to JSON File." -LogFile $runLog -PassThru
+
+        # Add Attachment Link plugin output to TXT Case
+        if ($ReportEvidence.EvaluationResults.Attachments) {
+            # Add Attachment plugin output to Case
+            New-PIELogger -logSev "i" -Message "Case File - Begin - Attachment Details to JSON File." -LogFile $runLog -PassThru
+            ForEach ($AttachmentDetails in $ReportEvidence.EvaluationResults.Attachments) {
+                $CaseFileBase = "\A_$($AttachmentDetails.Name)_"
+                if ($AttachmentDetails.Plugins.VirusTotal.Status) {
+                    $Count_VirusTotal += 1
+                    $CaseFileOutput = $CaseFileBase + "VirusTotal_" + $("{0:d2}" -f $Count_VirusTotal).ToString() + ".json"
+                    $AttachmentDetails.Plugins.VirusTotal.Results | ConvertTo-JSON -Depth 40 | Out-File -FilePath $caseFolder$caseID$CaseFileOutput
+                }
+            }
+            New-PIELogger -logSev "i" -Message "Case File - End - Attachment Details to JSON File." -LogFile $runLog -PassThru
+
+            New-PIELogger -logSev "i" -Message "Case File -  Begin - Embedded URL scan results from Attachment to JSON File." -LogFile $runLog -PassThru
+            ForEach ($AttachmentUrlDetails in $ReportEvidence.EvaluationResults.Attachments.Links.Details) {
+                $CaseFileBase = "\AU_$($AttachmentUrlDetails.Host)_"
+                if ($AttachmentUrlDetails.Plugins.Shodan) {
+                    $Count_Shodan += 1
+                    $CaseFileOutput = $CaseFileBase + "Shodan_" + $("{0:d2}" -f $Count_Shodan).ToString() + ".json"
+                    $AttachmentUrlDetails.Plugins.Shodan | ConvertTo-JSON -Depth 40 | Out-File -FilePath $caseFolder$caseID$CaseFileOutput 
+                }
+                if ($AttachmentUrlDetails.Plugins.urlscan) {
+                    $Count_UrlScan += 1
+                    $CaseFileOutput = $CaseFileBase + "UrlScan_" + $("{0:d2}" -f $Count_UrlScan).ToString() + ".json"
+                    $AttachmentUrlDetails.Plugins.urlscan | ConvertTo-JSON -Depth 40 | Out-File -FilePath $caseFolder$caseID$CaseFileOutput 
+                }
+                if ($AttachmentUrlDetails.Plugins.VirusTotal) {
+                    $Count_VirusTotal += 1
+                    $CaseFileOutput = $CaseFileBase + "VirusTotal_" + $("{0:d2}" -f $Count_VirusTotal).ToString() + ".json"
+                    $AttachmentUrlDetails.Plugins.VirusTotal | ConvertTo-JSON -Depth 40 | Out-File -FilePath $caseFolder$caseID$CaseFileOutput 
+
+                }
+            }
+            New-PIELogger -logSev "i" -Message "Case File -  End - Embedded URL scan results from Attachment to JSON File." -LogFile $runLog -PassThru
+        }
+        New-PIELogger -logSev "s" -Message "Case File - End - Writing plugin details to JSON File." -LogFile $runLog -PassThru
+
         # Write TXT Report as Evidence
         New-PIELogger -logSev "s" -Message "Case File - Begin - Writing details to Case File." -LogFile $runLog -PassThru
         New-PIELogger -logSev "i" -Message "Case File - Writing to $($caseFolder)$($caseId)\Case_Report.txt" -LogFile $runLog -PassThru
@@ -1199,16 +1294,20 @@ if ($InboxNewMail.count -eq 0) {
         # Add Link plugin output to TXT Case
         ForEach ($UrlDetails in $ReportEvidence.EvaluationResults.Links.Details) {
             if ($UrlDetails.Plugins.Shodan) {
+                # Output Shodan Summary to Case TXT Report
                 $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
                 $($UrlDetails.Plugins.Shodan | Format-ShodanTextOutput) | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                $UrlDetails.Plugins.Shodan = $($UrlDetails.Plugins.Shodan | Format-ShodanTextOutput)
             }
             if ($UrlDetails.Plugins.urlscan) {
                 $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
                 $($UrlDetails.Plugins.urlscan | Format-UrlscanTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                $UrlDetails.Plugins.urlscan = $($UrlDetails.Plugins.urlscan | Format-UrlscanTextOutput) 
             }
             if ($UrlDetails.Plugins.VirusTotal) {
                 $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
                 $($UrlDetails.Plugins.VirusTotal | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                $UrlDetails.Plugins.VirusTotal = $($UrlDetails.Plugins.VirusTotal | Format-VTTextOutput)
             }
         }
 
@@ -1217,10 +1316,12 @@ if ($InboxNewMail.count -eq 0) {
             # Add Attachment plugin output to Case
             New-PIELogger -logSev "i" -Message "Case File - Appending Attachment Details to Case File." -LogFile $runLog -PassThru
             ForEach ($AttachmentDetails in $ReportEvidence.EvaluationResults.Attachments) {
+                
+                if ($AttachmentDetails.Plugins.VirusTotal.Status) {
                     $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                    if ($AttachmentDetails.Plugins.VirusTotal.Status) {
-                        $($AttachmentDetails.Plugins.VirusTotal.Results | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
-                    }
+                    $($AttachmentDetails.Plugins.VirusTotal.Results | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    $AttachmentDetails.Plugins.VirusTotal.Results = $($AttachmentDetails.Plugins.VirusTotal.Results | Format-VTTextOutput)
+                }
             }
 
 
@@ -1229,18 +1330,38 @@ if ($InboxNewMail.count -eq 0) {
                 if ($AttachmentUrlDetails.Plugins.Shodan) {
                     $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
                     $($AttachmentUrlDetails.Plugins.Shodan | Format-ShodanTextOutput) | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    $AttachmentUrlDetails.Plugins.Shodan = $($AttachmentUrlDetails.Plugins.Shodan | Format-ShodanTextOutput)
                 }
                 if ($AttachmentUrlDetails.Plugins.urlscan) {
                     $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
                     $($AttachmentUrlDetails.Plugins.urlscan | Format-UrlscanTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    $AttachmentUrlDetails.Plugins.urlscan = $($AttachmentUrlDetails.Plugins.urlscan | Format-UrlscanTextOutput)
                 }
                 if ($AttachmentUrlDetails.Plugins.VirusTotal) {
                     $EvidenceSeperator  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
                     $($AttachmentUrlDetails.Plugins.VirusTotal | Format-VTTextOutput)  | Out-File -FilePath $caseFolder$caseID$CaseFile -Append
+                    $AttachmentUrlDetails.Plugins.VirusTotal = $($AttachmentUrlDetails.Plugins.VirusTotal | Format-VTTextOutput)
                 }
             }
         }
         New-PIELogger -logSev "s" -Message "Case File - End - Writing details to Case File." -LogFile $runLog -PassThru
+
+        if ($LrSearchResultLogs) {
+            New-PIELogger -logSev "i" -Message "Case Logs - Writing Search Result logs to $($caseFolder)$($caseId)\Case_Logs.csv" -LogFile $runLog -PassThru
+            Try {
+                $LrSearchResultLogs | Export-Csv -Path "$caseFolder$caseID\Case_Logs.csv" -Force -NoTypeInformation
+            } Catch {
+                New-PIELogger -logSev "e" -Message "Case Logs - Unable to write Search Result logs to $($caseFolder)$($caseId)\Case_Logs.csv" -LogFile $runLog -PassThru
+            }
+        }
+
+        # Write PIE Report Json object out to Case as Evidence
+        New-PIELogger -logSev "i" -Message "Case Json - Writing ReportEvidence to $($caseFolder)$($caseId)\Case_Report.json" -LogFile $runLog -PassThru
+        Try {
+            $ReportEvidence | ConvertTo-Json -Depth 50 | Out-File -FilePath "$caseFolder$caseID\Case_Report.json"
+        } Catch {
+            New-PIELogger -logSev "e" -Message "Case Json - Unable to write ReportEvidence to $($caseFolder)$($caseId)\Case_Report.json" -LogFile $runLog -PassThru
+        }
 
         New-PIELogger -logSev "i" -Message "Phish Log - Writing details to Phish Log." -LogFile $runLog -PassThru
         Try {
