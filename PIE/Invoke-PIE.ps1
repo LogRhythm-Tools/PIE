@@ -2,7 +2,7 @@ using namespace System.Collections.Generic
 <#
   #====================================#
   # PIE - Phishing Intelligence Engine #
-  # v4.0  --  February 2021            #
+  # v4.2  --  December 2021            #
   #====================================#
 
 # Copyright 2021 LogRhythm Inc.   
@@ -57,8 +57,8 @@ if ( $EncodedXMLCredentials ) {
     #              Plain Text Credentials - Not Recommended
     #      Set line 43 to $false to leverage Username and Password variables.
     # ================================================================================
-    $username = ""
-    $password = ''
+    #$username = ""
+    #$password = ''
 }
 
 # E-mail address for SOC Mailbox.  Typically same as Username value.
@@ -69,6 +69,9 @@ $SocMailbox = ""
 #  Gmail:       imap.gmail.com
 #  Office 365:  outlook.office365.com
 # ================================================================================
+# Microsoft Exchange - Set to $true when connecting to on-premise Exchange server over IMAP
+$MSExchange = $false
+$MailClientDebug = $false
 
 # MailServer for IMAP Connection
 $MailServer = "outlook.office365.com"
@@ -137,20 +140,26 @@ $shodan = $true
 $RunContextUser = ([Environment]::UserDomainName + "\" + [Environment]::UserName)
 
 # To support and facilitate accessing and creating resources
-$pieFolder = $PSScriptRoot
+if ($PSScriptRoot) {
+    $pieFolder = $PSScriptRoot
+} else {
+    $pieFolder = Get-Location
+}
+
 
 # Folder Structure
-$phishLog = "$pieFolder\logs\ongoing-phish-log.csv"
-$caseFolder = "$pieFolder\cases\"
-$tmpFolder = "$pieFolder\tmp\"
-$runLog = "$pieFolder\logs\pierun.txt"
+$pieLogs = Join-Path -Path $pieFolder -ChildPath 'logs'
+$phishLog = Join-Path -Path $pieLogs -ChildPath 'ongoing-phish-log.csv'
+$caseFolder = Join-Path -Path $pieFolder -ChildPath 'cases'
+$tmpFolder = Join-Path -Path $pieFolder -ChildPath  'tmp'
+$runLog = Join-Path -Path $pieLogs -ChildPath 'pierun.txt'
+$mailClientLog = Join-Path -Path $pieLogs -ChildPath 'mailclient.txt'
 
-$LogsOutputFolder = (Join-Path $pieFolder -ChildPath "logs")
-if (!(Test-Path $LogsOutputFolder)) {
+if (!(Test-Path $pieLogs)) {
     Try {
-        New-Item -Path $LogsOutputFolder -ItemType Directory -Force | Out-Null
+        New-Item -Path $pieLogs -ItemType Directory -Force | Out-Null
     } Catch {
-        Write-Host "Unable to create folder: $LogsOutputFolder"
+        Write-Host "Unable to create folder: $pieLogs"
     } 
 }
 
@@ -226,29 +235,27 @@ if ($dllLockedFileStatus -eq $true) {
     exit 1
 }
 
-$CaseOutputFolder = (Join-Path $pieFolder -ChildPath "cases")
-if (!(Test-Path $CaseOutputFolder)) {
+if (!(Test-Path $caseFolder)) {
     Try {
-        New-PIELogger -logSev "i" -Message "Creating folder: $CaseOutputFolder" -LogFile $runLog -PassThru
-        New-Item -Path $CaseOutputFolder -ItemType Directory -Force | Out-Null
+        New-PIELogger -logSev "i" -Message "Creating folder: $caseFolder" -LogFile $runLog -PassThru
+        New-Item -Path $caseFolder -ItemType Directory -Force | Out-Null
     } Catch {
-        New-PIELogger -logSev "e" -Message "Unable to create folder: $CaseOutputFolder" -LogFile $runLog -PassThru
-        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $CaseOutputFolder" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "e" -Message "Unable to create folder: $caseFolder" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $caseFolder" -LogFile $runLog -PassThru
         exit 1
     } 
 }
 
-$CaseTmpFolder = (Join-Path $pieFolder -ChildPath "tmp")
-if (!(Test-Path $CaseTmpFolder)) {
+$tmpFolder = (Join-Path $pieFolder -ChildPath "tmp")
+if (!(Test-Path $tmpFolder)) {
     Try {
-        New-PIELogger -logSev "i" -Message "Creating folder: $CaseTmpFolder" -LogFile $runLog -PassThru
-        New-Item -Path $CaseTmpFolder -ItemType Directory -Force | Out-Null
+        New-PIELogger -logSev "i" -Message "Creating folder: $tmpFolder" -LogFile $runLog -PassThru
+        New-Item -Path $tmpFolder -ItemType Directory -Force | Out-Null
     } Catch {
-        New-PIELogger -logSev "e" -Message "Unable to create folder: $CaseTmpFolder" -LogFile $runLog -PassThru
-        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $CaseTmpFolder" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "e" -Message "Unable to create folder: $tmpFolder" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $tmpFolder" -LogFile $runLog -PassThru
         exit 1
     }
-    
 }
 
 # Email Parsing Varibles
@@ -270,15 +277,42 @@ if ( $(Test-Path $phishLog -PathType Leaf) -eq $false ) {
         exit 1
     }    
 }
+
+#Create phishLog if file does not exist.
+if ( $(Test-Path $mailClientLog -PathType Leaf) -eq $false ) {
+    New-PIELogger -logSev "a" -Message "No mailClientlog detected.  Created new $mailClientLog" -LogFile $runLog -PassThru
+    Try {
+        Set-Content $mailClientLog -Value "New PIE Mail Client Log"
+    } Catch {
+        New-PIELogger -logSev "e" -Message "Unable to create file: $mailClientLog" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "a" -Message "Verify User:$RunContextUser has permissions to Read/Write/Execute to Folder: $mailClientLog" -LogFile $runLog -PassThru
+        exit 1
+    }    
+}
+
 <# IMAP #>
 # Establish Mailkit IMAP Mail Client
-$MailClient = New-Object MailKit.Net.Imap.ImapClient
+if ($MailClientDebug) {
+    $MailClient = New-Object MailKit.Net.Imap.ImapClient([mailkit.protocollogger]::new([console]::OpenStandardOutput()))
+} else {
+    $MailClient = New-Object MailKit.Net.Imap.ImapClient
+}
+
 $MailClientSsl = [MailKit.Security.SecureSocketOptions]::Auto
 $MailClientCancelToken = New-Object System.Threading.CancellationToken($false)
+
+# Local Exchange Config - Permit local certificates
+if ($MSExchange) {
+    $MailClient.CheckCertificateRevocation = $false
+    #$Ntlm = New-Object MailKit.Security.SaslMechanismNtlm($username, $password)
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    $MailClientSsl = [MailKit.Security.SecureSocketOptions]::Auto
+}
 
 # Define Connection String
 New-PIELogger -logSev "i" -Message "Establishing IMAP connection to: $MailServer`:$MailServerPort" -LogFile $runLog -PassThru
 $MailClient.Connect($MailServer, $MailServerPort, $MailClientSsl, $MailClientCancelToken)
+
 # Authenticate
 if ($PSCredential) {
     Try {
@@ -292,6 +326,7 @@ if ($PSCredential) {
     New-PIELogger -logSev "i" -Message "Warning - Username and Password stored in plain text" -LogFile $runLog -PassThru
     Try {
         $MailClient.Authenticate($username, $password, $MailClientCancelToken)
+        #$MailClient.Authenticate($Ntlm)
     } Catch {
         New-PIELogger -logSev "e" -Message "Unable to authenticate to mail server." -LogFile $runLog -PassThru
         New-PIELogger -logSev "s" -Message "PIE Execution Halting" -LogFile $runLog -PassThru
@@ -391,36 +426,38 @@ if ($InboxNewMail.count -eq 0) {
         New-PIELogger -logSev "i" -Message "Evaluation GUID: $($ReportGuid)" -LogFile $runLog -PassThru
 
         # Add data for evaluated email
+        $ReportMeta = [PSCustomObject]@{
+            GUID = $null
+            Timestamp = $null
+            Metrics = [PSCustomObject]@{ 
+                Begin = $null
+                End = $null
+                Duration = $null
+            }
+            Version = [PSCustomObject]@{ 
+                PIE = $null
+                LRTools = $null
+            }
+        }
+        
+        $ReportSubmission = [PSCustomObject]@{
+            Sender = $null
+            SenderDisplayName = $null
+            Recipient = $null
+            Subject = [PSCustomObject]@{
+                Original = $null
+                Modified = $null
+            }
+            UtcDate = $null
+            MessageId = $null
+            Attachment = [PSCustomObject]@{
+                Name = $null
+                Type = $null
+                Hash = $null
+            }
+        }
+
         $ReportEvidence = [PSCustomObject]@{
-            Meta = [PSCustomObject]@{ 
-                GUID = $null
-                Timestamp = $null
-                Metrics = [PSCustomObject]@{ 
-                    Begin = $null
-                    End = $null
-                    Duration = $null
-                }
-                Version = [PSCustomObject]@{ 
-                    PIE = $null
-                    LRTools = $null
-                }
-            }
-            ReportSubmission = [PSCustomObject]@{
-                Sender = $null
-                SenderDisplayName = $null
-                Recipient = $null
-                Subject = [PSCustomObject]@{
-                    Original = $null
-                    Modified = $null
-                }
-                UtcDate = $null
-                MessageId = $null
-                Attachment = [PSCustomObject]@{
-                    Name = $null
-                    Type = $null
-                    Hash = $null
-                }
-            }
             EvaluationResults = [PSCustomObject]@{
                 Sender = $null
                 SenderDisplayName = $null
@@ -461,75 +498,76 @@ if ($InboxNewMail.count -eq 0) {
                 Url = $null
                 Details = $null
             }
-            LogRhythmSearch = [PSCustomObject]@{
-                TaskID = $null
-                Status = $null
-                Summary = [PSCustomObject]@{
-                    Quantity = $null
-                    Recipient = $null
+        }
+
+        $LogRhythmSearch = [PSCustomObject]@{
+            TaskID = $null
+            Status = $null
+            Summary = [PSCustomObject]@{
+                Quantity = $null
+                Recipient = $null
+                Sender = $null
+                Subject = $null
+            }
+            Details = [PSCustomObject]@{
+                SendAndSubject = [PSCustomObject]@{ 
                     Sender = $null
                     Subject = $null
+                    Recipients = $null
+                    Quantity = $null
                 }
-                Details = [PSCustomObject]@{
-                    SendAndSubject = [PSCustomObject]@{ 
-                        Sender = $null
-                        Subject = $null
-                        Recipients = $null
-                        Quantity = $null
-                    }
-                    Sender = [PSCustomObject]@{ 
-                        Sender = $null
-                        Recipients = $null
-                        Subjects = $null
-                        Quantity = $null
-                    }
-                    Subject = [PSCustomObject]@{ 
-                        Senders = $null
-                        Recipients = $null
-                        Subject = $null
-                        Quantity = $null
-                    }
+                Sender = [PSCustomObject]@{ 
+                    Sender = $null
+                    Recipients = $null
+                    Subjects = $null
+                    Quantity = $null
+                }
+                Subject = [PSCustomObject]@{ 
+                    Senders = $null
+                    Recipients = $null
+                    Subject = $null
+                    Quantity = $null
                 }
             }
         }
 
         # Set initial time data
-        $ReportEvidence.Meta.Timestamp = $StartTime.ToString("yyyy-MM-ddTHHmmssffZ")
-        $ReportEvidence.Meta.Metrics.Begin = $StartTime.ToString("yyyy-MM-ddTHHmmssffZ")
+        $ReportMeta.Timestamp = $StartTime.ToString("yyyy-MM-ddTHHmmssffZ")
+        $ReportMeta.Metrics.Begin = $StartTime.ToString("yyyy-MM-ddTHHmmssffZ")
 
         # Set PIE Metadata versions
-        $ReportEvidence.Meta.Version.PIE = $PIEVersion
-        $ReportEvidence.Meta.Version.LRTools = $LRTVersion
+        $ReportMeta.Version.PIE = $PIEVersion
+        $ReportMeta.Version.LRTools = $LRTVersion
 
         # Set PIE Meta GUID
-        $ReportEvidence.Meta.Guid = $ReportGuid
+        $ReportMeta.Guid = $ReportGuid
 
         # Set ReportSubmission data
-        $ReportEvidence.ReportSubmission.Sender = $($NewReport.From.Address)
-        $ReportEvidence.ReportSubmission.SenderDisplayName = $($NewReport.From.Name)
-        $ReportEvidence.ReportSubmission.Recipient = $($NewReport.To.Address)
-        $ReportEvidence.ReportSubmission.Subject.Original = $($NewReport.Subject)
-        $ReportEvidence.ReportSubmission.UtcDate = $($NewReport.date.utcdatetime).ToString("yyyy-MM-ddTHHmmssffZ")
-        $ReportEvidence.ReportSubmission.MessageId = $($NewReport.messageid)
+        $ReportSubmission.Sender = $($NewReport.From.Address)
+        $ReportSubmission.SenderDisplayName = $($NewReport.From.Name)
+        $ReportSubmission.Recipient = $($NewReport.To.Address)
+        $ReportSubmission.Subject.Original = $($NewReport.Subject)
+        $ReportSubmission.UtcDate = $($NewReport.date.utcdatetime).ToString("yyyy-MM-ddTHHmmssffZ")
+        $ReportSubmission.MessageId = $($NewReport.messageid)
 
 
         # Track the user who reported the message
-        New-PIELogger -logSev "i" -Message "Sent By: $($ReportEvidence.ReportSubmission.Sender)  Reported Subject: $($ReportEvidence.ReportSubmission.Subject.Original)" -LogFile $runLog -PassThru
+        New-PIELogger -logSev "i" -Message "Sent By: $($ReportSubmission.Sender)  Reported Subject: $($ReportSubmission.Subject.Original)" -LogFile $runLog -PassThru
         
         # Extract and load attached e-mail attachment
         foreach ($Attachment in $($NewReport.Attachments)) {
             if ($Attachment.ContentType.MimeType -eq "message/rfc822") {
                 New-PIELogger -logSev "s" -Message "Processing rfc822 data format" -LogFile $runLog -PassThru
-                $ReportEvidence.ReportSubmission.Attachment.Name = $Attachment.Message.From.Address.Replace("@","_").replace(".","-") + ".eml"
-                $ReportEvidence.ReportSubmission.Attachment.Type = $Attachment.ContentType.MimeType
-                $TmpSavePath = [System.IO.FileInfo]::new((Join-Path -Path $tmpFolder -ChildPath $ReportEvidence.ReportSubmission.Attachment.Name))
+                $ReportSubmission.Attachment.Name = $Attachment.Message.From.Address.Replace("@","_").replace(".","-") + ".eml"
+                $ReportSubmission.Attachment.Type = $Attachment.ContentType.MimeType
+                $TmpSavePath = [System.IO.FileInfo]::new((Join-Path -Path $tmpFolder -ChildPath $ReportSubmission.Attachment.Name))
                 $Attachment.Message.WriteTo($TmpSavePath)
 
-                $ReportEvidence.ReportSubmission.Attachment.Hash = @(Get-FileHash -Path $TmpSavePath -Algorithm SHA256)
+                $ReportSubmission.Attachment.Hash = @(Get-FileHash -Path $TmpSavePath -Algorithm SHA256)
             } elseif ($Attachment.ContentType.Name -match "^.*\.(eml|msg)") {
                 New-PIELogger -logSev "s" -Message "Processing .msg/.eml file format" -LogFile $runLog -PassThru
-                $ReportEvidence.ReportSubmission.Attachment.Name = $Attachment.ContentType.Name
-                $ReportEvidence.ReportSubmission.Attachment.Type = $Attachment.ContentType.MimeType
+                $ReportSubmission.Attachment.Name = $Attachment.ContentType.Name
+                $ReportSubmission.Attachment.Type = $Attachment.ContentType.MimeType
                 $TmpSavePath = [System.IO.FileInfo]::new((Join-Path -Path $tmpFolder -ChildPath $Attachment.ContentType.Name))
                 
                 # Establish FileStream to faciliating extracting e-mail attachment
@@ -551,7 +589,7 @@ if ($InboxNewMail.count -eq 0) {
 
         # Load e-mail from file
         $Eml = [MimeKit.MimeMessage]::Load($TmpSavePath)
-        $ReportEvidence.ReportSubmission.Attachment.Hash = @(Get-FileHash -Path $TmpSavePath -Algorithm SHA256)
+        $ReportSubmission.Attachment.Hash = @(Get-FileHash -Path $TmpSavePath -Algorithm SHA256)
 
         $ReportEvidence.EvaluationResults.Subject.Original = $Eml.Subject
         if ($($ReportEvidence.EvaluationResults.Subject.Original) -Match "$specialPattern") {
@@ -674,8 +712,8 @@ if ($InboxNewMail.count -eq 0) {
                 $ReportEvidence.EvaluationResults.LogRhythmTrueId.Sender = $LrTrueIdSender
             }
             Start-Sleep 0.2
-            New-PIELogger -logSev "i" -Message "LogRhythm API - TrueID Recipient: $($ReportEvidence.ReportSubmission.Sender)" -LogFile $runLog -PassThru
-            $LrTrueIdRecipient = Get-LrIdentities -Identifier $ReportEvidence.ReportSubmission.Sender
+            New-PIELogger -logSev "i" -Message "LogRhythm API - TrueID Recipient: $($ReportSubmission.Sender)" -LogFile $runLog -PassThru
+            $LrTrueIdRecipient = Get-LrIdentities -Identifier $ReportSubmission.Sender
             if ($LrTrueIdRecipient) {
                 New-PIELogger -logSev "i" -Message "LogRhythm API - Recipient Identitity Id: $($LrTrueIdRecipient.identityId)" -LogFile $runLog -PassThru
                 $ReportEvidence.EvaluationResults.LogRhythmTrueId.Recipient = $LrTrueIdRecipient
@@ -687,7 +725,7 @@ if ($InboxNewMail.count -eq 0) {
         if ($Eml.To.count -ge 1 -or $Eml.To.Length -ge 1) {
             $ReportEvidence.EvaluationResults.Recipient.To = $Eml.To.Address
         } else {
-            $ReportEvidence.EvaluationResults.Recipient.To = $ReportEvidence.ReportSubmission.Sender
+            $ReportEvidence.EvaluationResults.Recipient.To = $ReportSubmission.Sender
         }
         $ReportEvidence.EvaluationResults.Recipient.CC = $Eml.CC
         $ReportEvidence.EvaluationResults.UtcDate = $Eml.Date.UtcDateTime.ToString("yyyy-MM-ddTHHmmssffZ")
@@ -936,40 +974,40 @@ if ($InboxNewMail.count -eq 0) {
                 } until ($SearchStatus.TaskStatus -like "Completed*" -or ($LrLogSearchAttempts -ge $LrLogSearchMaxAttempts))
                 
                 New-PIELogger -logSev "i" -Message "LogRhythm Search API - TaskId: $($LrSearchTask.TaskId) Status: $($SearchStatus.TaskStatus)" -LogFile $runLog -PassThru
-                $ReportEvidence.LogRhythmSearch.TaskId = $LrSearchTask.TaskId
+                $LogRhythmSearch.TaskId = $LrSearchTask.TaskId
                 $LrSearchResults = $SearchStatus
-                $ReportEvidence.LogRhythmSearch.Status = $SearchStatus.TaskStatus
+                $LogRhythmSearch.Status = $SearchStatus.TaskStatus
             } else {
                 New-PIELogger -logSev "s" -Message "LogRhythm Search API - Unable to successfully initiate " -LogFile $runLog -PassThru
-                $ReportEvidence.LogRhythmSearch.Status = "Error"
+                $LogRhythmSearch.Status = "Error"
             }
 
-            if ($($ReportEvidence.LogRhythmSearch.Status) -like "Completed*" -and ($($ReportEvidence.LogRhythmSearch.Status) -notlike "Completed: No Results")) {
+            if ($($LogRhythmSearch.Status) -like "Completed*" -and ($($LogRhythmSearch.Status) -notlike "Completed: No Results")) {
                 $LrSearchResultLogs = $LrSearchResults.Items
                 
                 # Build summary:
-                $ReportEvidence.LogRhythmSearch.Summary.Quantity = $LrSearchResultLogs.count
-                $ReportEvidence.LogRhythmSearch.Summary.Recipient = $LrSearchResultLogs | Select-Object -ExpandProperty recipient -Unique
-                $ReportEvidence.LogRhythmSearch.Summary.Sender = $LrSearchResultLogs | Select-Object -ExpandProperty sender -Unique
-                $ReportEvidence.LogRhythmSearch.Summary.Subject = $LrSearchResultLogs | Select-Object -ExpandProperty subject -Unique
+                $LogRhythmSearch.Summary.Quantity = $LrSearchResultLogs.count
+                $LogRhythmSearch.Summary.Recipient = $LrSearchResultLogs | Select-Object -ExpandProperty recipient -Unique
+                $LogRhythmSearch.Summary.Sender = $LrSearchResultLogs | Select-Object -ExpandProperty sender -Unique
+                $LogRhythmSearch.Summary.Subject = $LrSearchResultLogs | Select-Object -ExpandProperty subject -Unique
                 # Establish Unique Sender & Subject log messages
                 $LrSendAndSubject = $LrSearchResultLogs | Where-Object {$_.sender -like $($ReportEvidence.EvaluationResults.Sender) -and $_.subject -like $($ReportEvidence.EvaluationResults.Subject.Original)}
-                $ReportEvidence.LogRhythmSearch.Details.SendAndSubject.Quantity = $LrSendAndSubject.count
-                $ReportEvidence.LogRhythmSearch.Details.SendAndSubject.Recipients = $LrSendAndSubject | Select-Object -ExpandProperty recipient -Unique
-                $ReportEvidence.LogRhythmSearch.Details.SendAndSubject.Subject = $LrSendAndSubject | Select-Object -ExpandProperty subject -Unique
-                $ReportEvidence.LogRhythmSearch.Details.SendAndSubject.Sender = $LrSendAndSubject | Select-Object -ExpandProperty sender -Unique
+                $LogRhythmSearch.Details.SendAndSubject.Quantity = $LrSendAndSubject.count
+                $LogRhythmSearch.Details.SendAndSubject.Recipients = $LrSendAndSubject | Select-Object -ExpandProperty recipient -Unique
+                $LogRhythmSearch.Details.SendAndSubject.Subject = $LrSendAndSubject | Select-Object -ExpandProperty subject -Unique
+                $LogRhythmSearch.Details.SendAndSubject.Sender = $LrSendAndSubject | Select-Object -ExpandProperty sender -Unique
                 # Establish Unique Sender log messages
                 $LrSender = $LrSearchResultLogs | Where-Object {$_.sender -like $($ReportEvidence.EvaluationResults.Sender) -and $_ -notcontains $LrSendAndSubject}
-                $ReportEvidence.LogRhythmSearch.Details.Sender.Quantity = $LrSender.count
-                $ReportEvidence.LogRhythmSearch.Details.Sender.Recipients = $LrSender | Select-Object -ExpandProperty recipient -Unique
-                $ReportEvidence.LogRhythmSearch.Details.Sender.Subjects = $LrSender | Select-Object -ExpandProperty subject -Unique
-                $ReportEvidence.LogRhythmSearch.Details.Sender.Sender = $LrSender | Select-Object -ExpandProperty sender -Unique
+                $LogRhythmSearch.Details.Sender.Quantity = $LrSender.count
+                $LogRhythmSearch.Details.Sender.Recipients = $LrSender | Select-Object -ExpandProperty recipient -Unique
+                $LogRhythmSearch.Details.Sender.Subjects = $LrSender | Select-Object -ExpandProperty subject -Unique
+                $LogRhythmSearch.Details.Sender.Sender = $LrSender | Select-Object -ExpandProperty sender -Unique
                 # Establish Unique Subject log messages
                 $LrSubject = $LrSearchResultLogs | Where-Object {$_.subject -like $($ReportEvidence.EvaluationResults.Subject.Original) -and $_ -notcontains $LrSender -and $_ -notcontains $LrSendAndSubject}
-                $ReportEvidence.LogRhythmSearch.Details.Subject.Quantity = $LrSubject.count
-                $ReportEvidence.LogRhythmSearch.Details.Subject.Recipients = $LrSubject | Select-Object -ExpandProperty recipient -Unique
-                $ReportEvidence.LogRhythmSearch.Details.Subject.Subject = $LrSubject | Select-Object -ExpandProperty subject -Unique
-                $ReportEvidence.LogRhythmSearch.Details.Subject.Senders = $LrSubject | Select-Object -ExpandProperty sender -Unique
+                $LogRhythmSearch.Details.Subject.Quantity = $LrSubject.count
+                $LogRhythmSearch.Details.Subject.Recipients = $LrSubject | Select-Object -ExpandProperty recipient -Unique
+                $LogRhythmSearch.Details.Subject.Subject = $LrSubject | Select-Object -ExpandProperty subject -Unique
+                $LogRhythmSearch.Details.Subject.Senders = $LrSubject | Select-Object -ExpandProperty sender -Unique
             }
             New-PIELogger -logSev "s" -Message "LogRhythm API - End Log Search" -LogFile $runLog -PassThru
         }
@@ -979,9 +1017,9 @@ if ($InboxNewMail.count -eq 0) {
         # Conclude runtime metrics
         $EndTime = (get-date).ToUniversalTime()
         New-PIELogger -logSev "i" -Message "Processing End Time: $($EndTime)" -LogFile $runLog -PassThru
-        $ReportEvidence.Meta.Metrics.End = $EndTime.ToString("yyyy-MM-ddTHHmmssffZ")
+        $ReportMeta.Metrics.End = $EndTime.ToString("yyyy-MM-ddTHHmmssffZ")
         $Duration = New-Timespan -Start $StartTime -End $EndTime
-        $ReportEvidence.Meta.Metrics.Duration = $Duration.ToString("%m\.%s\.%f")
+        $ReportMeta.Metrics.Duration = $Duration.ToString("%m\.%s\.%f")
         
         # Create Summary Notes for Case Output
         $CaseSummaryNote = Format-PIECaseSummary -ReportEvidence $ReportEvidence
@@ -995,11 +1033,11 @@ if ($InboxNewMail.count -eq 0) {
             New-PIELogger -logSev "s" -Message "LogRhythm API - Create Case" -LogFile $runLog -PassThru
             if ( $ReportEvidence.EvaluationResults.Sender.Contains("@") -eq $true) {
                 New-PIELogger -logSev "d" -Message "LogRhythm API - Create Case with Sender Info" -LogFile $runLog -PassThru
-                $caseSummary = "Phishing email from $($ReportEvidence.EvaluationResults.Sender) was reported on $($ReportEvidence.ReportSubmission.UtcDate) UTC by $($ReportEvidence.ReportSubmission.Sender). The subject of the email is ($($ReportEvidence.EvaluationResults.Subject.Original))."
+                $caseSummary = "Phishing email from $($ReportEvidence.EvaluationResults.Sender) was reported on $($ReportSubmission.UtcDate) UTC by $($ReportSubmission.Sender). The subject of the email is ($($ReportEvidence.EvaluationResults.Subject.Original))."
                 $CaseDetails = New-LrCase -Name "Phishing : $spammerName [at] $spammerDomain" -Priority 3 -Summary $caseSummary -PassThru
             } else {
                 New-PIELogger -logSev "d" -Message "LogRhythm API - Create Case without Sender Info" -LogFile $runLog -PassThru
-                $caseSummary = "Phishing email was reported on $($ReportEvidence.ReportSubmission.UtcDate) UTC by $($ReportEvidence.ReportSubmission.Sender). The subject of the email is ($($ReportEvidence.EvaluationResults.Subject.Original))."
+                $caseSummary = "Phishing email was reported on $($ReportSubmission.UtcDate) UTC by $($ReportSubmission.Sender). The subject of the email is ($($ReportEvidence.EvaluationResults.Subject.Original))."
                 $CaseDetails = New-LrCase -Name "Phishing Message Reported" -Priority 3 -Summary $caseSummary -PassThru
                 
             }
@@ -1025,7 +1063,7 @@ if ($InboxNewMail.count -eq 0) {
                 Update-LrCaseEarliestEvidence -Id $($ReportEvidence.LogRhythmCase.Number) -Timestamp $EvidenceTimestamp
             } else {
                 # Based on report submission for evaluation
-                [datetime] $EvidenceTimestamp = [datetime]::parseexact($ReportEvidence.ReportSubmission.UtcDate, "yyyy-MM-ddTHHmmssffZ", $null)
+                [datetime] $EvidenceTimestamp = [datetime]::parseexact($ReportSubmission.UtcDate, "yyyy-MM-ddTHHmmssffZ", $null)
                 Update-LrCaseEarliestEvidence -Id $($ReportEvidence.LogRhythmCase.Number) -Timestamp $EvidenceTimestamp
             }
 
@@ -1166,7 +1204,7 @@ if ($InboxNewMail.count -eq 0) {
             }
 
             # Search note
-            if ($ReportEvidence.LogRhythmSearch.Summary.Quantity -ge 1) {
+            if ($LogRhythmSearch.Summary.Quantity -ge 1) {
                 New-PIELogger -logSev "i" -Message "LogRhythm API - Add LogRhythm Search summary note to case" -LogFile $runLog -PassThru
                 $LrSearchSummary = $(Format-PIESearchSummary -ReportEvidence $ReportEvidence)
                 $NoteStatus = Add-LrNoteToCase -Id $ReportEvidence.LogRhythmCase.Number -Text $LrSearchSummary.Substring(0,[System.Math]::Min(20000, $LrSearchSummary.Length)) -PassThru
@@ -1190,8 +1228,8 @@ if ($InboxNewMail.count -eq 0) {
             Add-LrNoteToCase -Id $ReportEvidence.LogRhythmCase.Number -Text $CaseSummaryNote.Substring(0,[System.Math]::Min(20000, $CaseSummaryNote.Length))
 
             # If we have Log Results, add these to the case.
-            if (($($ReportEvidence.LogRhythmSearch.Status) -like "Completed*") -and ($($ReportEvidence.LogRhythmSearch.Status) -notlike "Completed: No Results")) {
-                Add-LrLogsToCase -Id $ReportEvidence.LogRhythmCase.Number -Note "Message trace matching sender or subject of the submitted e-mail message." -IndexId $($ReportEvidence.LogRhythmSearch.TaskId)
+            if (($($LogRhythmSearch.Status) -like "Completed*") -and ($($LogRhythmSearch.Status) -notlike "Completed: No Results")) {
+                Add-LrLogsToCase -Id $ReportEvidence.LogRhythmCase.Number -Note "Message trace matching sender or subject of the submitted e-mail message." -IndexId $($LogRhythmSearch.TaskId)
             }
 
             $ReportEvidence.LogRhythmCase.Details = Get-LrCaseById -Id $ReportEvidence.LogRhythmCase.Number
@@ -1365,7 +1403,7 @@ if ($InboxNewMail.count -eq 0) {
 
         New-PIELogger -logSev "i" -Message "Phish Log - Writing details to Phish Log." -LogFile $runLog -PassThru
         Try {
-            $PhishLogContent = "$($ReportEvidence.Meta.GUID),$($ReportEvidence.Meta.Timestamp),$($ReportEvidence.ReportSubmission.MessageId),$($ReportEvidence.EvaluationResults.Sender),$($ReportEvidence.ReportSubmission.Sender)"
+            $PhishLogContent = "$($ReportMeta.GUID),$($ReportMeta.Timestamp),$($ReportSubmission.MessageId),$($ReportEvidence.EvaluationResults.Sender),$($ReportSubmission.Sender)"
             $PhishLogContent | Out-File -FilePath $PhishLog -Append
         } Catch {
             New-PIELogger -logSev "e" -Message "Phish Log - Unable to write to $PhishLog" -LogFile $runLog -PassThru
@@ -1378,7 +1416,7 @@ if ($InboxNewMail.count -eq 0) {
     $attachment = $null
     $attachments = $null
     $caseID = $null
-    New-PIELogger -logSev "i" -Message "End - Processing for GUID: $($ReportEvidence.Meta.Guid)" -LogFile $runLog -PassThru
+    New-PIELogger -logSev "i" -Message "End - Processing for GUID: $($ReportMeta.Guid)" -LogFile $runLog -PassThru
 }
 
 # Move items from inbox to target folders
